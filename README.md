@@ -1,35 +1,56 @@
-SuperComputer Project Manual
+SuperComputer Project Manual (v4.8a)
 
 Introduction
 
-The SuperComputer Project (SCP) is designed for distributed task management within a cluster of nodes. 
-It enables remote commands, node self-checks, and safe arithmetic evaluations, while providing both graphical (GUI) and text-based (CUI) interfaces.
+The SuperComputer Project (SCP) is a distributed task management system designed for clusters of nodes. SCP enables remote commands, node self-checks, and secure arithmetic evaluations while offering both a graphical (GUI) and a text-based (CUI) interface.
 
+What`s New (v4.8a):
+
+Security Enhancements:
+TLS for TCP Communications: All TCP traffic can be encrypted using TLS (if certificate and key files are present in SCP_config).
+HMAC Verification: UDP discovery messages now include an HMAC to ensure authenticity.
+Handshake Refresh: The authentication token is automatically refreshed every 5 minutes via a secure handshake mechanism.
+Rate Limiting: Prevents abuse by limiting the number of connections from a single IP.
+Cleanup: Unused and deprecated features have been removed.
 Architecture & Key Features
-
 Distributed Task Management:
-Uses UDP broadcasts to discover nodes and TCP for task communication between master and worker nodes.
+SCP uses UDP broadcasts for node discovery and TCP (optionally wrapped with TLS) for task communication between master and worker nodes.
 
+Security Measures:
+
+TLS Encryption: Protects TCP communication.
+HMAC for Discovery: Ensures that UDP discovery messages are genuine.
+Handshake Refresh: Periodically updates the shared authentication token.
+Rate Limiting: Mitigates connection abuse and potential DoS attacks.
 Safe Evaluation:
-Contains a safe_eval function that securely evaluates arithmetic expressions using a restricted Python AST.
+SCP includes a safe_eval function that securely evaluates arithmetic expressions using a restricted Python AST.
 
 User Interfaces:
-CUI (Console UI): Uses the curses library to present a terminal-based interactive prompt.
-GUI (Graphical UI): Uses tkinter to offer a windowed interface.
 
+CUI (Console UI): Uses the curses library for an interactive terminal-based experience.
+GUI (Graphical UI): Uses tkinter for a windowed command interface.
 Configuration & Logging:
-SCP creates a SCP_config folder for log files (scp.log) and stores external user commands in user_cmds.json.
+SCP creates a SCP_config directory for persistent data such as log files (scp.log) and external commands (user_cmds.json).
 
 Command-Line Arguments
-When running SCP, you can provide:
 
---gui: Launches the script in GUI mode.
---color <color>: Sets the UI text color (e.g., blue, red).
---auth <token>: Sets a custom authentication token for distributed tasks.
---role <master|worker>: Specifies the node role. Defaults to master if not provided.
+When launching SCP, you can use the following options:
+
+--gui
+Launches SCP in GUI mode.
+
+--color <color>
+Sets the UI text color (e.g., blue, red).
+
+--auth <token>
+Sets a custom authentication token for task verification.
+
+--role <master|worker>
+Specifies the node role. If not provided, the node defaults to master.
+
+Note: With version 4.8a, secure TLS communication and rate limiting are automatically enabled if the necessary certificate files exist.
 
 Detailed Command Descriptions
-
 help
 Usage: help
 Description: Displays a list of available commands and their descriptions.
@@ -40,11 +61,11 @@ Description: Exits the command prompt.
 
 nsc
 Usage: nsc
-Description: Runs a self-check on the local node and returns details like session ID and uptime.
+Description: Runs a self-check on the local node, returning details like session ID and uptime.
 
 nsc_all
 Usage: nsc_all
-Description: Requests a self-check from all discovered nodes in the network.
+Description: Requests self-checks from all discovered nodes.
 
 nodes
 Usage: nodes
@@ -56,74 +77,74 @@ Description: Retrieves the list of current tasks running on all nodes.
 
 clear
 Usage: clear
-Description: Clears the output window (or terminal).
+Description: Clears the output window or terminal.
 
 quarantine
 Usage: quarantine <on|off> [target]
-Description: Toggles quarantine mode on either all nodes (when no target is provided) or a specific node (when a target session ID is provided). A timed prompt awaits confirmation on remote nodes.
+Description: Toggles quarantine mode. If no target is specified, the command is broadcast to all nodes; otherwise, it targets a specific node (matched by session ID). A timed prompt awaits confirmation on remote nodes.
 
 cal
 Usage: cal <expression>
-Description: Safely evaluates arithmetic expressions using a restricted evaluation function.
+Description: Safely evaluates an arithmetic expression using a restricted evaluation function.
 
 addcmd
 Usage: addcmd <command_name> <lambda code>
-Description: Allows you to register new commands. Newly added commands require approval to be activated in subsequent sessions.
+Description: Registers a new external command. New commands require approval before they become active in subsequent sessions.
 
 switch_role
 Usage: switch_role <master|worker>
 Description: Switches the node's role within the cluster.
 
-External & User-Defined Commands
-SCP supports adding external commands via the addcmd command. When a new command is detected:
-
-The script prompts for approval (if ran interactively).
-Unapproved commands will not be executed until confirmed.
-These commands are saved in the user_cmds.json file for persistence.
-
-User Interface Details
-
-CUI (Console User Interface):
-Utilizes the curses library to show current node status, a dynamic prompt, and output window.
-Note: If --role isn’t specified, a warning is issued and defaults to master mode.
-
-GUI (Graphical User Interface):
-Uses tkinter to create a window with an output text box, input field, and a send button for command entry.
+Note: The handshake process (for updating the auth token) is handled automatically and is not exposed as a user command.
 
 Networking & Distributed Tasks
 
 Discovery:
-Nodes broadcast and listen on UDP port 50000 for service discovery.
-Discovered nodes are tracked with a timeout cleanup mechanism.
+Nodes use UDP on port 50000 to broadcast a discovery message. Each message includes an HMAC to validate its authenticity. Discovered nodes are tracked and cleaned up if inactive.
 
 Task Communication:
-
-TCP port 50001 is used for sending and receiving JSON-based task requests and responses (e.g., node self-check, quarantine commands).
+TCP port 50001 is used for sending and receiving JSON-based task requests and responses. If TLS is enabled, these connections are secured.
 
 Timed Input for Remote Commands:
-Remote quarantine requests use a timed prompt (10 seconds) to await a user’s decision. If no response is received, the command is declined by default.
+Remote quarantine requests employ a timed prompt (10 seconds) to await a response; lack of input results in the command being declined.
+
+Security & Rate Limiting
+
+TLS Encryption:
+Wraps TCP sockets to secure communications (requires valid certificate and key files in SCP_config).
+
+HMAC Verification:
+Ensures that discovery messages and certain task communications are authentic by using the shared authentication token.
+
+Handshake Refresh:
+Every 5 minutes, the authentication token is updated via a secure handshake process with all discovered nodes.
+
+Rate Limiting:
+Limits the number of allowed connections from a single IP within a given window to help prevent abuse.
 
 Configuration & Logging
 
 Configuration Folder:
-All persistent data, such as logs and user commands, is stored in the SCP_config directory.
+Persistent data such as logs and user-defined commands are stored in the SCP_config directory.
 
 Log Files:
-The scp.log file records startup details, command executions, errors, and node discovery events.
+The scp.log file records startup details, command executions, errors, node discovery events, and security-related events.
 
 Troubleshooting & Debugging
 
 Error Logging:
-Check the scp.log file for detailed error messages and activity logs.
+Refer to the scp.log file for detailed error messages and system logs.
 
 Common Issues:
 
 Missing dependencies may prevent the GUI or CUI from launching.
-Incorrect command-line arguments can be resolved by referring to the help message.
+Incorrect command-line arguments can usually be resolved by reviewing the help message (help command).
 
 Final Notes
+
 Versioning:
-This manual applies to SCP version 4.6a. Future updates might introduce new features or modifications, please note that I will attempt to keep this manual as up-to-date as possible though, I am only a one-man-army, so please do not expect it to be soon.
+This manual applies to SCP version 4.8a. Future updates may introduce additional features or modifications.
 
 Support & Contributions:
-Contributions, bug reports, and/or feature requests are welcome. Please open an issue or submit a pull request on GitHub.
+
+Contributions, bug reports, and feature requests are welcome. Please open an issue report or submit a pull request on GitHub.
