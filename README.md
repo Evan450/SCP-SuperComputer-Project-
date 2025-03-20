@@ -61,7 +61,7 @@ Specifies the node role. If not provided, the node defaults to master.
 
 Note: With version 4.8a, secure TLS communication and rate limiting are automatically enabled if the necessary certificate files exist.
 
-4. Detailed Command Descriptions
+4. Command Descriptions
 
 help
 Usage: help
