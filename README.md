@@ -1,8 +1,9 @@
 SuperComputer Project Manual (v4.8a)
 
-Introduction
+1. Introduction
 
-The SuperComputer Project (SCP) is a distributed task management system designed for clusters of nodes. SCP enables remote commands, node self-checks, and secure arithmetic evaluations while offering both a graphical (GUI) and a text-based (CUI) interface.
+The SuperComputer Project (SCP) is a distributed task management system designed for clusters of nodes.
+SCP enables remote commands, node self-checks, and secure arithmetic evaluations while offering both a graphical (GUI) and a text-based (CUI) interface.
 
 What`s New (v4.8a):
 
@@ -17,28 +18,32 @@ Rate Limiting: Prevents abuse by limiting the number of connections from a singl
 
 Cleanup: Unused and deprecated features have been removed.
 
-Architecture & Key Features
+2. Architecture & Key Features
 
 Distributed Task Management:
 SCP uses UDP broadcasts for node discovery and TCP (optionally wrapped with TLS) for task communication between master and worker nodes.
 
 Security Measures:
-
 TLS Encryption: Protects TCP communication.
+
 HMAC for Discovery: Ensures that UDP discovery messages are genuine.
+
 Handshake Refresh: Periodically updates the shared authentication token.
+
 Rate Limiting: Mitigates connection abuse and potential DoS attacks.
+
 Safe Evaluation:
 SCP includes a safe_eval function that securely evaluates arithmetic expressions using a restricted Python AST.
 
 User Interfaces:
-
 CUI (Console UI): Uses the curses library for an interactive terminal-based experience.
+
 GUI (Graphical UI): Uses tkinter for a windowed command interface.
+
 Configuration & Logging:
 SCP creates a SCP_config directory for persistent data such as log files (scp.log) and external commands (user_cmds.json).
 
-Command-Line Arguments
+3. Command-Line Arguments
 
 When launching SCP, you can use the following options:
 
@@ -56,7 +61,8 @@ Specifies the node role. If not provided, the node defaults to master.
 
 Note: With version 4.8a, secure TLS communication and rate limiting are automatically enabled if the necessary certificate files exist.
 
-Detailed Command Descriptions
+4. Detailed Command Descriptions
+
 help
 Usage: help
 Description: Displays a list of available commands and their descriptions.
@@ -103,7 +109,7 @@ Description: Switches the node's role within the cluster.
 
 Note: The handshake process (for updating the auth token) is handled automatically and is not exposed as a user command.
 
-Networking & Distributed Tasks
+5. Networking & Distributed Tasks
 
 Discovery:
 Nodes use UDP on port 50000 to broadcast a discovery message. Each message includes an HMAC to validate its authenticity. Discovered nodes are tracked and cleaned up if inactive.
@@ -128,7 +134,7 @@ Every 5 minutes, the authentication token is updated via a secure handshake proc
 Rate Limiting:
 Limits the number of allowed connections from a single IP within a given window to help prevent abuse.
 
-Configuration & Logging
+6. Configuration & Logging
 
 Configuration Folder:
 Persistent data such as logs and user-defined commands are stored in the SCP_config directory.
@@ -142,15 +148,14 @@ Error Logging:
 Refer to the scp.log file for detailed error messages and system logs.
 
 Common Issues:
-
 Missing dependencies may prevent the GUI or CUI from launching.
+
 Incorrect command-line arguments can usually be resolved by reviewing the help message (help command).
 
-Final Notes
+7. Final Notes
 
 Versioning:
 This manual applies to SCP version 4.8a. Future updates may introduce additional features or modifications.
 
 Support & Contributions:
-
 Contributions, bug reports, and feature requests are welcome. Please open an issue report or submit a pull request on GitHub.
