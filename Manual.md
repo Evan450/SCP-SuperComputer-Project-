@@ -1,22 +1,16 @@
-SuperComputer Project Manual (v4.8a)
+SuperComputer Project Manual (v4.9a)
 
 1. Introduction
 
 The SuperComputer Project (SCP) is a distributed task management system designed for clusters of nodes.
 SCP enables remote commands, node self-checks, and secure arithmetic evaluations while offering both a graphical (GUI) and a text-based (CUI) interface.
 
-What`s New (v4.8a):
+What`s New (v4.9a):
 
-Security Enhancements:
-TLS for TCP Communications: All TCP traffic can be encrypted using TLS (if certificate and key files are present in SCP_config).
+Port Binding
 
-HMAC Verification: UDP discovery messages now include an HMAC to ensure authenticity.
-
-Handshake Refresh: The authentication token is automatically refreshed every 5 minutes via a secure handshake mechanism.
-
-Rate Limiting: Prevents abuse by limiting the number of connections from a single IP.
-
-Cleanup: Unused and deprecated features have been removed.
+Bind the server sockets to a specific interface using:
+python SCP.py --bind-ip [Ip]
 
 2. Architecture & Key Features
 
@@ -59,7 +53,7 @@ Sets a custom authentication token for task verification.
 --role <master|worker>
 Specifies the node role. If not provided, the node defaults to master.
 
-Note: With version 4.8a, secure TLS communication and rate limiting are automatically enabled if the necessary certificate files exist.
+Note: With version 4.8a, secure TLS communication and rate limiting are automatically enabled if the necessary certificate files exist. (Version 4.9a does not change this.)
 
 4. Command Descriptions
 
@@ -120,7 +114,7 @@ TCP port 50001 is used for sending and receiving JSON-based task requests and re
 Timed Input for Remote Commands:
 Remote quarantine requests employ a timed prompt (10 seconds) to await a response; lack of input results in the command being declined.
 
-Security & Rate Limiting
+Security and Rate Limiting
 
 TLS Encryption:
 Wraps TCP sockets to secure communications (requires valid certificate and key files in SCP_config).
@@ -133,6 +127,10 @@ Every 5 minutes, the authentication token is updated via a secure handshake proc
 
 Rate Limiting:
 Limits the number of allowed connections from a single IP within a given window to help prevent abuse.
+
+Port Binding:
+Use --bind-ip to bind to a dedicated interface.
+
 
 6. Configuration & Logging
 
