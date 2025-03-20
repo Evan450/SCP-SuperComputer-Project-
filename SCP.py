@@ -1,31 +1,14 @@
 #!/usr/bin/env python3
 """
- Copyright (C) 2025 Discover Interactive
-
- This program is free software: you can redistribute it and/or modify
- it under the terms of the GNU General Public License as published by
- the Free Software Foundation, either version 3 of the License, or
- (at your option) any later version.
-
- This program is distributed in the hope that it will be useful,
- but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- GNU General Public License for more details.
-
- You should have received a copy of the GNU General Public License
- along with this program. If not, see https://choosealicense.com/licenses/gpl-3.0/ or https://www.gnu.org/licenses/gpl-3.0.en.html.
-
--- Updates and Secondary Header --
-
 Name: SuperComputer Project (SCP)
 Author: Discover Interactive
-Version: 4.6a
+Version: 4.8a
 Description:
-  - Remote quarantine requests (task type "set_quarantine") are now handled with a timed prompt
-    that waits up to 10 seconds for a response. If no input is received, the request is automatically declined.
+  - Added security measures which include: TLS for TCP communication, HMAC verification, Handshake Refresh, and Rate limiting.
+  - Cleaned up unused and deprecated features. 
 """
 
-import os, sys, socket, threading, time, json, logging, uuid, argparse, base64, io, math, ast, operator as op, random, shlex, select
+import os, sys, socket, threading, time, json, logging, uuid, argparse, base64, io, math, ast, operator as op, random, shlex, select, hmac, hashlib
 from collections import deque
 
 ###############################################################################
@@ -37,6 +20,23 @@ if not os.path.exists(CONFIG_DIR):
 
 LOG_FILE = os.path.join(CONFIG_DIR, "scp.log")
 USER_CMDS_FILE = os.path.join(CONFIG_DIR, "user_cmds.json")
+
+###############################################################################
+# TLS Settings for TCP Communications
+###############################################################################
+USE_TLS = True
+TLS_CERT = os.path.join(CONFIG_DIR, "cert.pem")
+TLS_KEY  = os.path.join(CONFIG_DIR, "key.pem")
+if USE_TLS:
+    try:
+        import ssl
+        ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        ssl_context.load_cert_chain(certfile=TLS_CERT, keyfile=TLS_KEY)
+    except Exception as e:
+        logging.error("TLS setup failed: %s", e)
+        USE_TLS = False
 
 ###############################################################################
 # Optional UI Libraries
@@ -52,31 +52,6 @@ except ImportError:
     tk = None
 
 ###############################################################################
-# Optional Plotting & Numerical Libraries (Authorized Use Only!)
-###############################################################################
-try:
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-except ImportError:
-    plt = None
-try:
-    import numpy as np
-except ImportError:
-    np = None
-try:
-    import imageio.v2 as imageio
-except ImportError:
-    try:
-        import imageio
-    except ImportError:
-        imageio = None
-try:
-    import sympy as sp
-except ImportError:
-    sp = None
-
-###############################################################################
 # Configuration, Command-Line Args, and Logging
 ###############################################################################
 config = {
@@ -87,7 +62,7 @@ config = {
 }
 
 parser = argparse.ArgumentParser(
-    description="SCP (SuperComputer Project) - Version: 4.6a\n"
+    description="SCP (SuperComputer Project) - Version: 4.7a\n"
                 "On-run arguments:\n"
                 "  --gui                : Launch in GUI mode (for master nodes)\n"
                 "  --color <color>      : Set UI text color (e.g. 'blue')\n"
@@ -125,6 +100,8 @@ logging.info("SCP starting up. UI mode: %s, color: %s, role: %s", config["ui_mod
 UDP_DISCOVERY_PORT = 50000
 TCP_TASK_PORT = 50001
 DISCOVERY_MESSAGE = "SCP_DISCOVER"
+# For UDP, attach an HMAC using the shared secret (use the auth token as shared secret)
+SHARED_SECRET = config["auth_token"]
 RESPONSE_MESSAGE = "SCP_HERE"
 
 discovered_nodes = {}
@@ -141,6 +118,14 @@ current_tasks_lock = threading.Lock()
 current_tasks = set()
 
 start_time = time.time()  # For node uptime
+
+###############################################################################
+# Rate Limiting Globals
+###############################################################################
+rate_limit_lock = threading.Lock()
+connection_times = {}
+RATE_LIMIT_COUNT = 5
+RATE_LIMIT_WINDOW = 10  # seconds
 
 ###############################################################################
 # Safe AST Evaluator for Local Arithmetic
@@ -264,9 +249,11 @@ def dispatch_status_all() -> dict:
     return results
 
 def send_task_to_node(ip: str, task_obj: dict) -> dict:
-    """Open a TCP connection to ip:TCP_TASK_PORT, send JSON, and read the response."""
+    """Open a TLS-wrapped TCP connection to ip:TCP_TASK_PORT, send JSON, then read the response."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        if USE_TLS:
+            s = ssl_context.wrap_socket(s, server_hostname=ip)
         s.connect((ip, TCP_TASK_PORT))
         s.sendall(json.dumps(task_obj).encode('utf-8'))
         resp_data = b""
@@ -295,12 +282,19 @@ def tcp_task_server() -> None:
     while True:
         try:
             conn, addr = server_sock.accept()
+            if USE_TLS:
+                try:
+                    conn = ssl_context.wrap_socket(conn, server_side=True)
+                except Exception as e:
+                    logging.error("TLS wrap failed: %s", e)
+                    conn.close()
+                    continue
             threading.Thread(target=handle_task_connection, args=(conn, addr), daemon=True).start()
         except Exception as e:
             logging.error("Error accepting connection: %s", e)
             continue
 
-# Timed input for remote prompts (wait up to 'timeout' seconds)
+# Helper: Timed input for non-blocking prompt with timeout
 def timed_input(prompt, timeout=10):
     sys.stdout.write(prompt)
     sys.stdout.flush()
@@ -310,8 +304,21 @@ def timed_input(prompt, timeout=10):
     else:
         return "no"
 
+# Rate limiting helper
+def check_rate_limit(client_ip, query_id):
+    now = time.time()
+    with rate_limit_lock:
+        times = connection_times.get(client_ip, [])
+        times = [t for t in times if now - t < RATE_LIMIT_WINDOW]
+        if len(times) >= RATE_LIMIT_COUNT:
+            return False
+        times.append(now)
+        connection_times[client_ip] = times
+    return True
+
 def handle_task_connection(conn: socket.socket, addr) -> None:
     global quarantine_mode
+    client_ip = addr[0]
     try:
         data = b""
         while True:
@@ -322,18 +329,33 @@ def handle_task_connection(conn: socket.socket, addr) -> None:
         if not data:
             return
         msg = json.loads(data.decode('utf-8'))
+        if not check_rate_limit(client_ip, msg.get("query_id", "")):
+            resp = {"query_id": msg.get("query_id", ""), "result": "Rate limit exceeded."}
+            conn.sendall(json.dumps(resp).encode('utf-8'))
+            return
         if msg.get("auth_token", "") != config["auth_token"]:
             resp = {"query_id": msg.get("query_id", ""), "result": "Authentication failed"}
             conn.sendall(json.dumps(resp).encode('utf-8'))
             return
         ttype = msg.get("task_type", "nsc")
+        if ttype == "handshake":
+            new_token = msg.get("new_token", "")
+            received_hmac = msg.get("hmac", "")
+            expected_hmac = hmac.new(config["auth_token"].encode(), new_token.encode(), hashlib.sha256).hexdigest()
+            if received_hmac == expected_hmac:
+                config["auth_token"] = new_token
+                resp = {"query_id": msg.get("query_id", ""), "result": "Handshake successful. Auth token updated."}
+            else:
+                resp = {"query_id": msg.get("query_id", ""), "result": "Handshake failed: HMAC mismatch."}
+            conn.sendall(json.dumps(resp).encode('utf-8'))
+            return
+
         if ttype == "set_quarantine":
             mode = msg.get("mode", "").lower()
             if mode not in ("on", "off"):
                 resp = {"query_id": msg.get("query_id", ""), "result": "Invalid mode for set_quarantine."}
                 conn.sendall(json.dumps(resp).encode('utf-8'))
                 return
-            # Use timed_input so the prompt appears in the SCP terminal (if interactive) and times out.
             user_response = timed_input(f"Remote request: Set quarantine {mode}? (yes/no): ", timeout=10)
             if user_response.strip().lower() == "yes":
                 quarantine_mode = (mode == "on")
@@ -364,14 +386,16 @@ def handle_task_connection(conn: socket.socket, addr) -> None:
         conn.close()
 
 ###############################################################################
-# Node Discovery & Cleanup Threads
+# Node Discovery & Cleanup with HMAC for UDP Discovery
 ###############################################################################
 def broadcast_discovery() -> None:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     while True:
         try:
-            sock.sendto(DISCOVERY_MESSAGE.encode('utf-8'), ('255.255.255.255', UDP_DISCOVERY_PORT))
+            mac = hmac.new(SHARED_SECRET.encode(), DISCOVERY_MESSAGE.encode(), hashlib.sha256).hexdigest()
+            discovery_data = json.dumps({"msg": DISCOVERY_MESSAGE, "hmac": mac})
+            sock.sendto(discovery_data.encode('utf-8'), ('255.255.255.255', UDP_DISCOVERY_PORT))
         except Exception as e:
             logging.error("Broadcast error: %s", e)
         time.sleep(5)
@@ -382,14 +406,19 @@ def listen_for_discovery() -> None:
     while True:
         try:
             data, addr = sock.recvfrom(1024)
-            msg = data.decode('utf-8')
-            if msg == DISCOVERY_MESSAGE:
-                resp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                resp_sock.sendto(RESPONSE_MESSAGE.encode('utf-8'), addr)
-                resp_sock.close()
-            elif msg == RESPONSE_MESSAGE:
-                with discovered_nodes_lock:
-                    discovered_nodes[addr[0]] = time.time()
+            try:
+                discovery_msg = json.loads(data.decode('utf-8'))
+                msg = discovery_msg.get("msg", "")
+                received_mac = discovery_msg.get("hmac", "")
+                expected_mac = hmac.new(SHARED_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
+                if msg == DISCOVERY_MESSAGE and received_mac == expected_mac:
+                    resp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    resp_sock.sendto(RESPONSE_MESSAGE.encode('utf-8'), addr)
+                    resp_sock.close()
+                else:
+                    logging.warning("Invalid discovery message from %s", addr)
+            except Exception as ex:
+                logging.error("Error parsing discovery message: %s", ex)
         except Exception as e:
             logging.error("Discovery listener error: %s", e)
 
@@ -407,7 +436,7 @@ def cleanup_nodes() -> None:
             time.sleep(5)
 
 ###############################################################################
-# Command Dispatcher and External Commands
+# Command Dispatcher and External Command Persistence
 ###############################################################################
 # External commands stored as: command name -> {"code": <lambda code>, "approved": <bool>}
 user_commands = {}
@@ -447,7 +476,7 @@ def save_user_commands():
         logging.error("Error saving user commands: %s", e)
 
 ###############################################################################
-# Built-in Commands
+# Built-in Command Functions
 ###############################################################################
 def help_cmd(args):
     output = "Available commands:\n"
@@ -611,7 +640,7 @@ def modular_prompt():
             print(output)
 
 ###############################################################################
-# Curses UI
+# Curses UI (Split Windows Layout)
 ###############################################################################
 def main_cui(stdscr):
     global quarantine_mode
@@ -629,7 +658,7 @@ def main_cui(stdscr):
     input_win = curses.newwin(input_height, max_x, crd_height + output_height, 0)
     input_win.border(0)
 
-    output_win.addstr("SuperComputer Project (Mode: CUI).\n")
+    output_win.addstr("SCP Command Prompt (CUI).\n")
     output_win.addstr("Type 'help' for available commands.\n")
     if role_defaulted:
         output_win.addstr("WARNING: --role not provided. Defaulting to master mode.\n")
@@ -682,9 +711,9 @@ def process_gui_command(cmd, output_widget):
 
 def main_gui():
     root = tk.Tk()
-    root.title("SuperComputer Project - Version 4.6a")
+    root.title("SuperComputer Project - Version 4.8a")
     root.resizable(True, True)
-    header_label = tk.Label(root, text="SCP - Version 4.6a", font=("Helvetica", 14))
+    header_label = tk.Label(root, text="SCP - Version 4.8a", font=("Helvetica", 14))
     header_label.pack(pady=5)
     output_text = tk.scrolledtext.ScrolledText(root, state='normal', width=80, height=20)
     output_text.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
@@ -706,7 +735,34 @@ def main_gui():
     root.mainloop()
 
 ###############################################################################
-# Main Loop
+# Handshake Refresh: Periodically update auth token and notify peers
+###############################################################################
+def handshake_refresh():
+    global config
+    old_token = config["auth_token"]
+    while True:
+        time.sleep(300)  # every 5 minutes
+        new_token = uuid.uuid4().hex
+        hmac_val = hmac.new(old_token.encode(), new_token.encode(), hashlib.sha256).hexdigest()
+        handshake_message = {
+            "auth_token": old_token,
+            "origin": session_id,
+            "query_id": str(uuid.uuid4()),
+            "task_type": "handshake",
+            "new_token": new_token,
+            "hmac": hmac_val
+        }
+        with discovered_nodes_lock:
+            nodes = list(discovered_nodes.keys())
+        for ip in nodes:
+            r = send_task_to_node(ip, handshake_message)
+            logging.info("Handshake sent to %s, response: %s", ip, r)
+        config["auth_token"] = new_token
+        old_token = new_token
+        logging.info("Auth token refreshed via handshake.")
+
+###############################################################################
+# Main Entry Point with Error Recovery
 ###############################################################################
 def main():
     try:
@@ -714,6 +770,7 @@ def main():
         threading.Thread(target=listen_for_discovery, daemon=True).start()
         threading.Thread(target=cleanup_nodes, daemon=True).start()
         threading.Thread(target=tcp_task_server, daemon=True).start()
+        threading.Thread(target=handshake_refresh, daemon=True).start()
 
         if config["role"] == "master":
             if config["ui_mode"] == "gui" and tk is not None:
