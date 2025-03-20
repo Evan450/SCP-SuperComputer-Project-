@@ -8,11 +8,17 @@ What`s New (v4.8a):
 
 Security Enhancements:
 TLS for TCP Communications: All TCP traffic can be encrypted using TLS (if certificate and key files are present in SCP_config).
+
 HMAC Verification: UDP discovery messages now include an HMAC to ensure authenticity.
+
 Handshake Refresh: The authentication token is automatically refreshed every 5 minutes via a secure handshake mechanism.
+
 Rate Limiting: Prevents abuse by limiting the number of connections from a single IP.
+
 Cleanup: Unused and deprecated features have been removed.
+
 Architecture & Key Features
+
 Distributed Task Management:
 SCP uses UDP broadcasts for node discovery and TCP (optionally wrapped with TLS) for task communication between master and worker nodes.
 
