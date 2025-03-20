@@ -19,10 +19,10 @@
 
 Name: SuperComputer Project (SCP)
 Author: Discover Interactive
-Version: 4.8a
+Version: 4.9a
 Description:
-  - Added security measures which include: TLS for TCP communication, HMAC verification, Handshake Refresh, and Rate limiting.
-  - Cleaned up unused and deprecated features. 
+  - Fixed TLS versioning issue.
+  - Added port binding.
 """
 
 import os, sys, socket, threading, time, json, logging, uuid, argparse, base64, io, math, ast, operator as op, random, shlex, select, hmac, hashlib
@@ -50,6 +50,8 @@ if USE_TLS:
         ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         ssl_context.check_hostname = False
         ssl_context.verify_mode = ssl.CERT_NONE
+        # Force TLS 1.2+ by disabling older versions
+        ssl_context.options |= ssl.OP_NO_TLSv1 | ssl.OP_NO_TLSv1_1
         ssl_context.load_cert_chain(certfile=TLS_CERT, keyfile=TLS_KEY)
     except Exception as e:
         logging.error("TLS setup failed: %s", e)
@@ -85,12 +87,16 @@ parser = argparse.ArgumentParser(
                 "  --color <color>      : Set UI text color (e.g. 'blue')\n"
                 "  --auth <token>       : Set the authentication token\n"
                 "  --role <master|worker>: Set the node role in the cluster\n"
+                "  --bind-ip <ip>       : Bind server sockets to the specified IP address (for dedicated interface)"
 )
 parser.add_argument("--gui", action="store_true", help="Launch in GUI mode")
 parser.add_argument("--color", type=str, help="UI text color (e.g. 'blue')")
 parser.add_argument("--auth", type=str, help="Authentication token")
 parser.add_argument("--role", type=str, choices=["master", "worker"], help="Set node role (master/worker)")
+parser.add_argument("--bind-ip", type=str, help="IP address to bind incoming server sockets to", default="127.0.0.1")
 args = parser.parse_args()
+BIND_IP = args.bind_ip  # New global for binding sockets
+
 if args.gui:
     config["ui_mode"] = "gui"
 if args.color:
@@ -293,9 +299,10 @@ def send_task_to_node(ip: str, task_obj: dict) -> dict:
 def tcp_task_server() -> None:
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_sock.bind(('', TCP_TASK_PORT))
+    # Bind only to the specified interface instead of all interfaces
+    server_sock.bind((BIND_IP, TCP_TASK_PORT))
     server_sock.listen(5)
-    logging.info("TCP task server started on port %d", TCP_TASK_PORT)
+    logging.info("TCP task server started on %s:%d", BIND_IP, TCP_TASK_PORT)
     while True:
         try:
             conn, addr = server_sock.accept()
@@ -419,7 +426,8 @@ def broadcast_discovery() -> None:
 
 def listen_for_discovery() -> None:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(('', UDP_DISCOVERY_PORT))
+    # Bind only to the specified interface instead of all interfaces
+    sock.bind((BIND_IP, UDP_DISCOVERY_PORT))
     while True:
         try:
             data, addr = sock.recvfrom(1024)
@@ -728,9 +736,9 @@ def process_gui_command(cmd, output_widget):
 
 def main_gui():
     root = tk.Tk()
-    root.title("SuperComputer Project - Version 4.8a")
+    root.title("SuperComputer Project - Version 4.9a")
     root.resizable(True, True)
-    header_label = tk.Label(root, text="SCP - Version 4.8a", font=("Helvetica", 14))
+    header_label = tk.Label(root, text="SCP - Version 4.9a", font=("Helvetica", 14))
     header_label.pack(pady=5)
     output_text = tk.scrolledtext.ScrolledText(root, state='normal', width=80, height=20)
     output_text.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
