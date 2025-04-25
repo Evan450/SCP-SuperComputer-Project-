@@ -13,6 +13,12 @@ import psutil
 import threading
 import time
 from collections import defaultdict
+import logging
+
+
+discovered_nodes_lock = threading.Lock()
+
+discovered_nodes = {}
 
 class NetworkMonitor:
     def __init__(self):
@@ -131,7 +137,7 @@ network_monitor = NetworkMonitor()
 def get_module_info():
     return {
         "name": "netwatch",
-        "version": "1.0",
+        "version": "1.1",
         "author": "Discover Interactive",
         "description": "Network connection monitoring and alerting",
         "commands": {
